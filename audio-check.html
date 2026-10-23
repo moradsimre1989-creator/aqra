@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>فحص النطق — رحلتي إلى القراءة</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Noto+Naskh+Arabic:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --teal:#3E9AA8; --sand:#FBF7F3; --ink:#18345B; --slate:#6B6966; --ok:#21BDB5; --warn:#FFC94A; --bad:#C84656; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--sand); font-family:Tajawal,system-ui,sans-serif; color:var(--ink); }
+  header { background:#fff; padding:20px 16px; border-bottom:1px solid #0001; position:sticky; top:0; z-index:5; }
+  .wrap { max-width:1100px; margin:0 auto; padding:0 16px; }
+  h1 { margin:0 0 4px; font-size:26px; color:var(--teal); }
+  .sub { color:var(--slate); font-size:14px; line-height:1.7; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+  .chip { border:0; background:#fff; border:1px solid #0001; border-radius:99px; padding:9px 16px;
+          font-weight:700; font-size:14px; cursor:pointer; font-family:inherit; color:var(--slate); }
+  .chip[aria-pressed="true"] { background:var(--teal); color:#fff; border-color:var(--teal); }
+  main { padding:24px 0 60px; }
+  .group { margin-bottom:26px; }
+  .group h2 { font-size:18px; margin:0 0 10px; color:var(--teal); }
+  .row { display:flex; align-items:center; gap:12px; background:#fff; border-radius:16px;
+         padding:12px 14px; margin-bottom:8px; }
+  .play { width:46px; height:46px; min-width:46px; border-radius:50%; border:0; cursor:pointer;
+          background:#1769DC; color:#fff; font-size:17px; display:grid; place-items:center; }
+  .play:hover { background:#124DA8; }
+  .play.playing { background:var(--ok); }
+  .txt { font-family:'Noto Naskh Arabic',serif; font-size:26px; line-height:1.9; flex:1; min-width:0; }
+  .meta { font-size:12px; color:var(--slate); white-space:nowrap; }
+  .verdict { display:flex; gap:6px; }
+  .v { border:1px solid #0002; background:#fff; border-radius:10px; width:38px; height:34px;
+       cursor:pointer; font-size:15px; }
+  .v.on-ok { background:var(--ok); color:#fff; border-color:var(--ok); }
+  .v.on-bad { background:var(--bad); color:#fff; border-color:var(--bad); }
+  .summary { background:#fff; border-radius:16px; padding:16px; margin-bottom:20px; font-size:14px; line-height:1.9; }
+  .pill { display:inline-block; border-radius:99px; padding:3px 11px; font-size:12px; font-weight:700; color:#fff; }
+  code { background:#0000000d; padding:2px 6px; border-radius:6px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>فحص النطق</h1>
+    <p class="sub">
+      كل مقطع صوتي في المنصّة بصوت جمانة. اضغط للاستماع، وضع ✓ أو ✗ لكل بند.
+      التقييم يُحفظ في متصفّحك، ويمكنك تصديره في النهاية لإعادة توليد ما فشل.
+    </p>
+    <div class="bar" id="filters"></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="summary" id="summary">…جارٍ التحميل</div>
+  <div id="list"></div>
+</main>
+
+<script>
+const PRIORITY = ['صوت الحرف', 'اسم الحرف', 'مقطع', 'كلمة', 'جملة', 'سؤال', 'تعليمات', 'تلميح', 'تقديم', 'واجهة']
+
+let data = [], filter = 'الكل'
+const verdicts = JSON.parse(localStorage.getItem('audio-verdicts') || '{}')
+
+function kindOf(entry) {
+  const k = entry.kind || 'واجهة'
+  return PRIORITY.find(p => k.includes(p)) || 'أخرى'
+}
+
+async function load() {
+  const manifest = await fetch('audio/manifest.json').then(r => r.json())
+  let entries = []
+  try { entries = await fetch('audio-plan-entries.json').then(r => r.json()) } catch (e) { entries = [] }
+  const kindByText = new Map(entries.map(e => [e.text, e.kind]))
+
+  data = Object.entries(manifest).map(([text, file]) => ({ text, file, kind: kindByText.get(text) || 'واجهة' }))
+  data.sort((a, b) => PRIORITY.indexOf(kindOf(a)) - PRIORITY.indexOf(kindOf(b)))
+
+  const kinds = ['الكل', ...new Set(data.map(kindOf))]
+  document.getElementById('filters').innerHTML = kinds
+    .map(k => `<button class="chip" aria-pressed="${k === filter}" data-k="${k}">${k}</button>`).join('')
+  document.querySelectorAll('.chip').forEach(c =>
+    c.onclick = () => { filter = c.dataset.k; render() })
+
+  render()
+}
+
+function render() {
+  document.querySelectorAll('.chip').forEach(c =>
+    c.setAttribute('aria-pressed', c.dataset.k === filter))
+
+  const shown = data.filter(d => filter === 'الكل' || kindOf(d) === filter)
+  const groups = {}
+  shown.forEach(d => (groups[kindOf(d)] ??= []).push(d))
+
+  document.getElementById('list').innerHTML = Object.entries(groups).map(([k, items]) => `
+    <section class="group">
+      <h2>${k} <span class="meta">(${items.length})</span></h2>
+      ${items.map(it => {
+        const v = verdicts[it.text]
+        return `<div class="row">
+          <button class="play" data-f="${it.file}" aria-label="استمع">▶</button>
+          <div class="txt">${it.text}</div>
+          <div class="verdict">
+            <button class="v ${v === 'ok' ? 'on-ok' : ''}" data-t="${encodeURIComponent(it.text)}" data-v="ok" title="صحيح">✓</button>
+            <button class="v ${v === 'bad' ? 'on-bad' : ''}" data-t="${encodeURIComponent(it.text)}" data-v="bad" title="خطأ">✗</button>
+          </div>
+        </div>`
+      }).join('')}
+    </section>`).join('')
+
+  let current = null
+  document.querySelectorAll('.play').forEach(b => b.onclick = () => {
+    if (current) { current.a.pause(); current.b.classList.remove('playing') }
+    const a = new Audio('audio/' + b.dataset.f)
+    b.classList.add('playing')
+    a.onended = () => b.classList.remove('playing')
+    a.play()
+    current = { a, b }
+  })
+
+  document.querySelectorAll('.v').forEach(b => b.onclick = () => {
+    const t = decodeURIComponent(b.dataset.t)
+    verdicts[t] = verdicts[t] === b.dataset.v ? undefined : b.dataset.v
+    if (!verdicts[t]) delete verdicts[t]
+    localStorage.setItem('audio-verdicts', JSON.stringify(verdicts))
+    render()
+  })
+
+  updateSummary()
+}
+
+function updateSummary() {
+  const total = data.length
+  const ok = Object.values(verdicts).filter(v => v === 'ok').length
+  const bad = Object.values(verdicts).filter(v => v === 'bad').length
+  const left = total - ok - bad
+  document.getElementById('summary').innerHTML = `
+    <span class="pill" style="background:#21BDB5">صحيح ${ok}</span>
+    <span class="pill" style="background:#C84656">خطأ ${bad}</span>
+    <span class="pill" style="background:#9FB4CC">لم يُراجَع ${left}</span>
+    &nbsp; من ${total} مقطعًا.
+    ${bad ? `<div style="margin-top:10px">الفاشلة: <code>${Object.entries(verdicts).filter(([,v])=>v==='bad').map(([t])=>t).join(' · ')}</code></div>` : ''}
+  `
+}
+
+load()
+</script>
+</body>
+</html>
